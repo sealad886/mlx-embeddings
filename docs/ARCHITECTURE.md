@@ -13,12 +13,12 @@ The complete flow from model ID to inference-ready instance:
 1. `mlx_embeddings.utils.load(model_id_or_alias)`
 2. `resolve_model_reference()` maps family aliases (for example, `qwen3-vl`) to canonical HF IDs
 3. `get_model_path()` downloads or locates weights and `config.json`
-3. `load_config()` parses the model config
-4. `validate_model_type()` checks registry and trust_remote_code requirements
-5. `_get_classes()` dynamically imports `mlx_embeddings.models.{model_type}`
-6. `load_model()` instantiates the model and loads weights
-7. Tokenizer/processor is selected (`load_tokenizer()` or `AutoProcessor`)
-8. Returns `(model, tokenizer/processor)` ready for inference
+4. `load_config()` parses the model config
+5. `validate_model_type()` checks registry and trust_remote_code requirements
+6. `_get_classes()` dynamically imports `mlx_embeddings.models.{model_type}`
+7. `load_model()` instantiates the model and loads weights
+8. Tokenizer/processor is selected (`load_tokenizer()` or `AutoProcessor`)
+9. Returns `(model, tokenizer/processor)` ready for inference
 
 ### Provider Contract
 
