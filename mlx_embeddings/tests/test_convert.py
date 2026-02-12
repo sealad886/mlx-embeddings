@@ -33,8 +33,8 @@ class TestConfigureParser:
 
     def test_default_bits_and_group_size(self):
         args = self.parser.parse_args(["--hf-path", "test/model"])
-        assert args.q_bits == 4
-        assert args.q_group_size == 64
+        assert args.q_bits is None
+        assert args.q_group_size is None
 
     def test_all_convert_args_present(self):
         args = self.parser.parse_args(
