@@ -7,6 +7,7 @@ import mlx.core as mx
 import numpy as np
 import pytest
 
+import mlx_embeddings.utils as utils_module
 from mlx_embeddings.models.base import ViTModelOutput
 from mlx_embeddings.provider import Qwen3VLEmbeddingProvider
 from mlx_embeddings.utils import (
