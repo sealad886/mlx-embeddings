@@ -289,7 +289,7 @@ class VisionEmbeddings(nn.Module):
         interpolate_pos_encoding: bool = False,
         pixel_attention_mask: Optional[mx.array] = None,
     ) -> mx.array:
-        _, _, height, width = x.shape
+        _, height, width, _ = x.shape
         patch_embeddings = self.patch_embedding(x)
         patch_embeddings = mx.transpose(patch_embeddings, (0, 3, 1, 2))
         patch_embeddings = mx.flatten(patch_embeddings, start_axis=2, end_axis=3)
