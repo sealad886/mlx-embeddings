@@ -617,7 +617,7 @@ def load(
     adapter_path: Optional[str] = None,
     lazy: bool = False,
     trust_remote_code: bool = False,
-) -> Tuple[nn.Module, TokenizerWrapper]:
+) -> Tuple[nn.Module, Any]:
     """
     Load the model and tokenizer from a given path or a huggingface repository.
 
@@ -633,7 +633,9 @@ def load(
             loaded in memory before returning, otherwise they will be loaded
             when needed. Default: ``False``
     Returns:
-        Tuple[nn.Module, TokenizerWrapper]: A tuple containing the loaded model and tokenizer.
+        Tuple[nn.Module, Any]: A tuple containing the loaded model and tokenizer/processor.
+            The processor can be a TokenizerWrapper, Qwen3VLProcessorFallback, AutoProcessor,
+            or any processor from mlx_vlm.utils.load_processor.
 
     Raises:
         FileNotFoundError: If config file or safetensors are not found.
@@ -670,39 +672,32 @@ def load(
                 )
                 return model, tokenizer
 
+            # For vision models, prefer mlx_vlm.load_processor which properly supports
+            # return_tensors="mlx". Standard transformers AutoProcessor returns numpy/torch
+            # tensors which are incompatible with MLX models.
             try:
-                tokenizer = AutoProcessor.from_pretrained(
-                    model_path, trust_remote_code=trust_remote_code
+                tokenizer = load_processor(
+                    model_path,
+                    trust_remote_code=trust_remote_code,
                 )
-            except Exception as auto_processor_error:
-                logging.warning(
-                    "AutoProcessor initialization failed for '%s': %s. "
-                    "Falling back to mlx_vlm.utils.load_processor.",
-                    resolved_model,
-                    auto_processor_error,
-                )
-                try:
-                    tokenizer = load_processor(
-                        model_path,
-                        trust_remote_code=trust_remote_code,
-                    )
-                except Exception as processor_error:
-                    if model_type != "qwen3_vl":
-                        raise ValueError(
-                            f"Failed to initialize vision processor: {processor_error}"
-                        ) from processor_error
+            except Exception as processor_error:
+                if model_type != "qwen3_vl":
+                    # For non-qwen3_vl models, this is a hard error
+                    raise ValueError(
+                        f"Failed to initialize vision processor: {processor_error}"
+                    ) from processor_error
 
-                    logging.warning(
-                        "mlx_vlm.load_processor failed for '%s' using transformers==%s: %s. "
-                        "Using qwen3_vl fallback processor (text + image only, video unsupported).",
-                        resolved_model,
-                        TRANSFORMERS_VERSION,
-                        processor_error,
-                    )
-                    tokenizer = _build_qwen3_vl_fallback_processor(
-                        model_path=model_path,
-                        trust_remote_code=trust_remote_code,
-                    )
+                logging.warning(
+                    "mlx_vlm.load_processor failed for '%s' using transformers==%s: %s. "
+                    "Using qwen3_vl fallback processor (text + image only, video unsupported).",
+                    resolved_model,
+                    TRANSFORMERS_VERSION,
+                    processor_error,
+                )
+                tokenizer = _build_qwen3_vl_fallback_processor(
+                    model_path=model_path,
+                    trust_remote_code=trust_remote_code,
+                )
         else:
             tokenizer = load_tokenizer(
                 model_path, tokenizer_config, trust_remote_code=trust_remote_code
