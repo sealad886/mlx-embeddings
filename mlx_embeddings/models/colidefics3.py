@@ -1,5 +1,4 @@
 import json
-import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, Optional
@@ -68,7 +67,7 @@ class Model(VLModel):
 
     def __init__(self, config: ModelArgs):
         super().__init__(config)
-        assert config.mask_non_image_embeddings is False, "mask_non_image_embeddings is not implemeted yet in ColIdefics3."
+        assert config.mask_non_image_embeddings is False, "mask_non_image_embeddings is not implemented yet in ColIdefics3."
 
         self.embedding_dim = config.embedding_dim
         self.linear = nn.Linear(self.config.text_config.hidden_size, self.embedding_dim)

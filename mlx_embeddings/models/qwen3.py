@@ -515,8 +515,6 @@ class Model(nn.Module):
                 continue
 
             # Handle different checkpoint formats
-            new_key = key
-
             # Map common parameter naming patterns
             if key.startswith("transformer."):
                 # Some checkpoints use "transformer." prefix
