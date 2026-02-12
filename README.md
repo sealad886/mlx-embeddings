@@ -19,7 +19,17 @@ MLX-Embeddings supports a variety of model architectures for text embedding task
 - ModernBERT (modernized bidirectional encoder-only Transformer model)
 - Qwen3 (Qwen3's embedding model)
 
-We're continuously working to expand our support for additional model architectures. Check our GitHub repository or documentation for the most up-to-date list of supported models and their specific versions.
+We support a wide variety of embedding models for text and multimodal tasks. Each architecture is mapped to a native Hugging Face model family:
+
+| Architecture | Model Type | Use Case | Pooling Strategy | Reference |
+|---|---|---|---|---|
+| BERT | `bert` | Multilingual text embeddings | Mean pooling | [HuggingFace BERT](https://huggingface.co/bert-base-uncased) |
+| XLM-RoBERTa | `xlm_roberta` | 100+ language embeddings | Mean pooling | [HuggingFace XLM-R](https://huggingface.co/xlm-roberta-base) |
+| ModernBERT | `modernbert` | Efficient text embeddings | Configurable (CLS/Mean) | [Answer.AI ModernBERT](https://huggingface.co/answerdotai/ModernBERT-base) |
+| SigLIP | `siglip` | Vision-Language embeddings | Attention pooling | [Google SigLIP](https://huggingface.co/google/siglip-base-patch16-224) |
+| ColQwen | `colqwen2_5` | Document image retrieval | Multi-vector late interaction | [qnguyen3 ColQwen2.5](https://huggingface.co/qnguyen3/colqwen2.5-v0.2-mlx) |
+| **Qwen3-Embeddings** | **`qwen3`** | **High-performance text embeddings** | **Last-token pooling** | **[Qwen Qwen3-Embedding-0.6B](https://huggingface.co/Qwen/Qwen3-Embedding-0.6B)** |
+| **Qwen3-VL-Embeddings** | **`qwen3_vl`** | **Unified text-image embeddings** | **Last-token pooling after multimodal fusion** | **[Qwen Qwen3-VL-Embedding-2B](https://huggingface.co/Qwen/Qwen3-VL-Embedding-2B)** |
 
 ## Installation
 
@@ -35,6 +45,7 @@ pip install mlx-embeddings
 
 
 #### Text Embedding
+
 To generate an embedding for a single piece of text:
 
 ```python
@@ -79,6 +90,7 @@ print("Predicted token:", predicted_token)  # Should output: Paris
 ```
 
 #### Sequence classification
+
 ```python
 from mlx_embeddings.utils import load
 
@@ -195,6 +207,194 @@ predicted_token = tokenizer.batch_decode(predicted_token_ids)
 print("Predicted token:", predicted_token)
 # Predicted token:  Paris, Warsaw
 ```
+
+
+### Qwen3-Embeddings (Text-Only)
+
+High-performance embeddings using Qwen's latest text model:
+
+```python
+from mlx_embeddings.utils import load
+
+# Load the Qwen3-Embeddings model
+model, tokenizer = load("Qwen/Qwen3-Embedding-0.6B")
+
+# Encode text
+texts = ["The quick brown fox", "Lazy dog sleeping"]
+inputs = tokenizer.batch_encode_plus(
+    texts, return_tensors="mlx", padding=True, truncation=True
+)
+outputs = model(inputs["input_ids"], attention_mask=inputs["attention_mask"])
+
+print(outputs.text_embeds.shape)  # (2, 1024) - batch_size x embedding_dim
+print(outputs.text_embeds.dtype)  # model-dependent dtype
+```
+
+### Qwen3-VL-Embeddings (Vision-Language)
+
+Unified embeddings for both text-only and image+text items (same vector space):
+
+```python
+from mlx_embeddings import embed_text, embed_vision_language, load
+
+# You can use canonical model IDs or family aliases like "qwen3-vl"
+model, processor = load(
+    "qwen3-vl",
+    trust_remote_code=True,
+)
+
+# Text-only embedding (supported)
+text_embeds = embed_text(
+    model,
+    processor,
+    texts=["A scenic mountain landscape"],
+)
+print(text_embeds.shape)  # (1, 2048) for Qwen3-VL-Embedding-2B
+
+# Image+text embedding (primary)
+vl_embeds = embed_vision_language(
+    model,
+    processor,
+    items=[
+        {"text": "A scenic mountain landscape", "image": "mountain.jpg"},
+    ],
+)
+print(vl_embeds.shape)    # (1, 2048)
+print(vl_embeds.dtype)    # model-dependent dtype
+```
+
+### Qwen3-VL Support
+
+Qwen3-VL support in `mlx-embeddings` includes:
+
+- Model family discovery aliases:
+  - `qwen3-vl` -> `Qwen/Qwen3-VL-Embedding-2B` (default)
+  - `qwen3_vl` -> `Qwen/Qwen3-VL-Embedding-2B`
+- Canonical variants:
+  - `Qwen/Qwen3-VL-Embedding-2B`
+  - `Qwen/Qwen3-VL-Embedding-8B`
+- Input types:
+  - text-only (`list[str]`)
+  - image+text (`list[{"image": ..., "text"?: str}]`)
+  - image supports file paths, `PIL.Image.Image`, and raw bytes
+- Output behavior:
+  - one embedding per item in a unified space
+  - L2-normalized vectors intended for cosine similarity retrieval
+- Validation guarantees:
+  - no silent fallback from image+text to text-only
+  - explicit hard-errors on malformed multimodal batches
+  - explicit hard-errors when processor outputs are inconsistent
+
+Known limitations:
+
+- Qwen3-VL models are memory-intensive (2B/8B): tune batch size conservatively on laptop GPUs.
+- Very long prompts can exceed `text_config.max_position_embeddings` and will hard-error.
+- Environments without `torch`/`torchvision` use a guarded text+image processor fallback
+  (video processor paths are unavailable in that mode).
+- Image preprocessing is deterministic, but throughput depends on image resolution and model size.
+
+### CLI Usage
+
+```bash
+# List known model families
+mlx_embeddings --list-families
+
+# Text-only embedding
+mlx_embeddings --model qwen3-vl --text "cats on a couch"
+
+# Image+text embedding
+mlx_embeddings --model qwen3-vl --text "a photo of cats" --image ./images/cats.jpg
+
+# Full end-to-end demo (prints shape + deterministic fingerprints)
+python examples/qwen3_vl_end_to_end.py --model qwen3-vl --image ./images/cats.jpg
+```
+
+
+## Architecture Reference
+
+### How Model Loading Works
+
+mlx-embeddings uses a registry-based loader that:
+
+1. **Download**: Fetches model weights and config from Hugging Face Hub
+2. **Register**: Looks up `config.model_type` in the supported architectures registry
+3. **Validate**: Checks architecture-specific requirements (e.g., `trust_remote_code` for Qwen3-VL)
+4. **Import**: Dynamically loads the adapter module (e.g., `mlx_embeddings.models.qwen3`)
+5. **Initialize**: Creates Model instance with proper tokenizer/processor
+6. **Return**: Returns `(model, tokenizer)` pair ready for inference
+
+### Embedding Output Contract
+
+All models return embeddings conforming to this standardized contract:
+
+| Property | Value |
+|---|---|
+| **Shape** | `[batch_size, embedding_dim]` |
+| **Dtype** | Model-dependent (typically float16/bfloat16/float32) |
+| **Normalization** | L2-normalized unit vectors (cosine similarity compatible) |
+| **Determinism** | Given fixed seed and input, output is deterministic |
+
+### Pooling Strategies
+
+Different model architectures use different strategies to extract embeddings from hidden states:
+
+| Strategy | Models | Description |
+|---|---|---|
+| **Mean Pooling** | BERT, XLM-RoBERTa | Average all non-padding tokens |
+| **CLS Token** | ModernBERT (configurable) | Use [CLS] token representation |
+| **Last-Token** | Qwen3-Embeddings | Extract last non-padding token |
+| **Attention Pooling** | SigLIP | Learned attention weights across tokens |
+| **Fused** | Qwen3-VL, ColQwen2.5 | Architecture-specific internal fusion |
+
+## Adding Support for New Embedding Architectures
+
+To add support for a new embedding model family, follow these steps:
+
+### Step 1: Research the Upstream Contract
+
+- Identify the model's `config.model_type`
+- Determine the embedding extraction strategy (pooling)
+- Note any special requirements (tokenizer, vision inputs, trust_remote_code)
+
+### Step 2: Create an Adapter Module
+
+Create `mlx_embeddings/models/{architecture_name}.py` exporting:
+
+- `ModelArgs` dataclass with all config fields from upstream
+- `Model` nn.Module with `__call__(input_ids, attention_mask, ...)` → BaseModelOutput (text) or ViTModelOutput (multimodal)
+- `TextConfig` and `VisionConfig` if multimodal
+
+
+### Step 3: Add Tests
+
+Create `mlx_embeddings/tests/test_{architecture}_adapters.py`:
+
+- Unit tests: pooling, normalization, ModelArgs initialization
+- Integration tests: forward pass with real model config
+- Backward compatibility: ensure existing models still load
+
+
+Run: `pytest mlx_embeddings/tests/test_{architecture}_adapters.py -xvs`
+
+### Step 4: Update README and Registry
+
+1. Add row to Supported Models table
+2. Add usage examples
+3. Optional: Add entry to `SUPPORTED_MODELS` in `utils.py` if special validation needed
+
+### Step 5: Update Docs
+
+Update `docs/ARCHITECTURE.md` with:
+
+- Context-specific pooling details
+- Configuration example
+- Any special considerations
+
+
+### Reference Implementations
+
+- **Text-Only**: See `mlx_embeddings/models/qwen3.py`
+- **Multimodal**: See `mlx_embeddings/models/qwen3_vl.py`
 
 
 ## Vision Transformer Models
@@ -438,6 +638,46 @@ python -m mlx_embeddings.convert \
 - `--dtype`: Convert to specific dtype (`float16`, `bfloat16`, `float32`). Defaults to `float16`.
 - `--dequantize`: Dequantize a previously quantized model.
 - `--upload-repo`: Upload converted model to Hugging Face Hub.
+
+## Troubleshooting
+
+### Error: "Model type 'xyz' not supported"
+
+**Cause**: The model's `config.model_type` is not in the registry.
+
+**Solution**:
+
+1. Check you're using the latest mlx-embeddings: `pip install --upgrade mlx-embeddings`
+2. If your model is new, open an issue on GitHub with the model ID and config dump
+3. See "Adding Support for New Embedding Architectures" above
+
+
+### Error: "Qwen3-VL-Embeddings requires trust_remote_code=True"
+
+**Cause**: Qwen3-VL uses a custom Python class that needs explicit approval.
+
+**Solution**: Pass `trust_remote_code=True` when loading:
+
+```python
+from mlx_embeddings.utils import load
+
+model, processor = load(
+    "Qwen/Qwen3-VL-Embedding-2B",
+    trust_remote_code=True,
+)
+```
+
+### Embedding shapes are different across models
+
+This is expected! Different models have different embedding dimensions:
+
+| Model | Embedding Dim |
+|---|---|
+| all-MiniLM-L6-v2 | 384 |
+| Qwen3-Embedding-0.6B | 1024 |
+| Qwen3-Embedding-8B | 4096 |
+
+Check the Supported Models table for expected dimensions.
 
 ## Contributing
 

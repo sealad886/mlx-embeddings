@@ -22,10 +22,16 @@ def configure_parser() -> argparse.ArgumentParser:
         "-q", "--quantize", help="Generate a quantized model.", action="store_true"
     )
     parser.add_argument(
-        "--q-group-size", help="Group size for quantization.", type=int, default=64
+        "--q-group-size",
+        help="Group size for quantization (overrides mode default).",
+        type=int,
+        default=None,
     )
     parser.add_argument(
-        "--q-bits", help="Bits per weight for quantization.", type=int, default=4
+        "--q-bits",
+        help="Bits per weight for quantization (overrides mode default).",
+        type=int,
+        default=None,
     )
     parser.add_argument(
         "--q-mode",
@@ -51,6 +57,12 @@ def configure_parser() -> argparse.ArgumentParser:
         "-d",
         "--dequantize",
         help="Dequantize a quantized model.",
+        action="store_true",
+        default=False,
+    )
+    parser.add_argument(
+        "--trust-remote-code",
+        help="Trust remote code for custom model architectures (required for Qwen3-VL).",
         action="store_true",
         default=False,
     )
