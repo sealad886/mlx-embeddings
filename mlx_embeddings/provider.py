@@ -82,7 +82,8 @@ class TextEmbeddingProvider(EmbeddingProvider):
 
     def embed_vision_language(self, items: List[Dict[str, Any]], **kwargs) -> mx.array:
         raise ValueError(
-            f"Model type '{self.model_type}' does not support vision-language embedding."
+            f"Model type '{self.model_type}' does not support vision-language embedding. "
+            "Only 'qwen3_vl' is currently supported for multimodal embeddings."
         )
 
 

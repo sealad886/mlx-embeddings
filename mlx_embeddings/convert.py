@@ -25,13 +25,13 @@ def configure_parser() -> argparse.ArgumentParser:
         "--q-group-size",
         help="Group size for quantization (overrides mode default).",
         type=int,
-        default=64,
+        default=None,
     )
     parser.add_argument(
         "--q-bits",
         help="Bits per weight for quantization (overrides mode default).",
         type=int,
-        default=4,
+        default=None,
     )
     parser.add_argument(
         "--q-mode",

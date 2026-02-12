@@ -1147,8 +1147,8 @@ def _normalize_single_image_input(image: Any) -> Any:
     """Normalize supported image input types to values process_image understands."""
     if isinstance(image, Path):
         return str(image)
-    if isinstance(image, (bytes, bytearray)):
-        with Image.open(BytesIO(image)) as in_memory_image:
+    if isinstance(image, (bytes, bytearray, BytesIO)):
+        with Image.open(BytesIO(image) if not isinstance(image, BytesIO) else image) as in_memory_image:
             image = ImageOps.exif_transpose(in_memory_image)
             return image.convert("RGB")
     return image
