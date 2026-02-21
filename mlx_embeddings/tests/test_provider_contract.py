@@ -10,6 +10,7 @@ import pytest
 import mlx_embeddings.utils as utils_module
 from mlx_embeddings.models.base import ViTModelOutput
 from mlx_embeddings.provider import Qwen3VLEmbeddingProvider
+from mlx_embeddings import utils as utils_module
 from mlx_embeddings.utils import (
     embed_text,
     embed_vision_language,
@@ -19,6 +20,11 @@ from mlx_embeddings.utils import (
     prepare_inputs,
     resolve_model_reference,
 )
+
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from pytest import MonkeyPatch
 
 FIXTURE_IMAGE = Path(__file__).parent / "fixtures" / "tiny_rgb.png"
 
@@ -182,7 +188,7 @@ def test_qwen3_vl_text_only_embedding_supported():
     assert embeddings.dtype == mx.float32
 
 
-def test_qwen3_vl_dependency_gate_for_direct_fallback(monkeypatch):
+def test_qwen3_vl_dependency_gate_for_direct_fallback(monkeypatch: MonkeyPatch):
     monkeypatch.setattr(
         utils_module,
         "_module_available",
@@ -194,7 +200,9 @@ def test_qwen3_vl_dependency_gate_for_direct_fallback(monkeypatch):
     assert utils_module._qwen3_vl_needs_direct_fallback() is False
 
 
-def test_load_qwen3_vl_skips_auto_processor_without_torchvision(monkeypatch, tmp_path):
+def test_load_qwen3_vl_skips_auto_processor_without_torchvision(
+    monkeypatch: MonkeyPatch, tmp_path: Path
+):
     model_dir = tmp_path / "dummy-model"
     model_dir.mkdir()
 

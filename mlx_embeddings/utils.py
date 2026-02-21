@@ -20,7 +20,6 @@ import numpy as np
 from huggingface_hub import snapshot_download
 from huggingface_hub.errors import RepositoryNotFoundError
 from mlx.utils import tree_flatten, tree_unflatten
-from mlx_vlm.utils import load_processor, process_image
 from PIL import Image, ImageOps
 from transformers import (
     AutoImageProcessor,
@@ -148,6 +147,81 @@ class ModelNotFoundError(Exception):
         super().__init__(self.message)
 
 
+def _convert_return_tensors(
+    data: Dict[str, Any], return_tensors: str
+) -> Dict[str, Any]:
+    """Convert NumPy tensor fields to MLX arrays when requested."""
+    if return_tensors == "mlx":
+        return {
+            key: mx.array(value) if isinstance(value, np.ndarray) else value
+            for key, value in data.items()
+        }
+    return data
+
+
+class GenericVisionProcessorFallback:
+    """
+    Minimal text+image processor composed from AutoTokenizer + AutoImageProcessor.
+
+    This mirrors the subset of AutoProcessor used by this project for embedding
+    inference and keeps tensor conversion in-process (NumPy -> MLX).
+    """
+
+    def __init__(self, tokenizer: Any, image_processor: Any):
+        self.tokenizer = tokenizer
+        self.image_processor = image_processor
+
+    def encode(self, text: str, return_tensors: str = "mlx"):
+        encoded = self.tokenizer(
+            text,
+            return_tensors="np",
+        )
+        input_ids = encoded["input_ids"]
+        if return_tensors == "mlx":
+            return mx.array(input_ids)
+        return input_ids
+
+    def batch_encode_plus(
+        self,
+        texts: List[str],
+        return_tensors: str = "mlx",
+        padding: bool = True,
+        truncation: bool = True,
+        max_length: int = 512,
+    ):
+        encoded = self.tokenizer(
+            texts,
+            return_tensors="np",
+            padding=padding,
+            truncation=truncation,
+            max_length=max_length,
+        )
+        return _convert_return_tensors(encoded, return_tensors)
+
+    def __call__(
+        self,
+        text: List[str],
+        images: List[Any],
+        padding: bool = True,
+        truncation: bool = True,
+        max_length: int = 512,
+        return_tensors: str = "mlx",
+    ):
+        if not isinstance(text, list):
+            text = [text]
+
+        text_inputs = self.tokenizer(
+            text,
+            return_tensors="np",
+            padding=padding,
+            truncation=truncation,
+            max_length=max_length,
+        )
+        image_inputs = self.image_processor(images=images, return_tensors="np")
+        merged = {**text_inputs, **image_inputs}
+        return _convert_return_tensors(merged, return_tensors)
+
+
 class Qwen3VLProcessorFallback:
     """
     Minimal text+image processor for Qwen3-VL when AutoProcessor cannot initialize.
@@ -188,9 +262,7 @@ class Qwen3VLProcessorFallback:
             truncation=truncation,
             max_length=max_length,
         )
-        if return_tensors == "mlx":
-            return {k: mx.array(v) for k, v in encoded.items()}
-        return encoded
+        return _convert_return_tensors(encoded, return_tensors)
 
     def __call__(
         self,
@@ -244,12 +316,86 @@ class Qwen3VLProcessorFallback:
         )
 
         merged = {**text_inputs, **image_inputs}
-        if return_tensors == "mlx":
-            return {
-                key: mx.array(value) if isinstance(value, np.ndarray) else value
-                for key, value in merged.items()
-            }
-        return merged
+        return _convert_return_tensors(merged, return_tensors)
+
+
+def load_processor(model_path: Path, trust_remote_code: bool = False) -> Any:
+    """
+    Build a multimodal processor without relying on mlx_vlm.
+
+    We compose a local fallback from Transformers primitives so processor
+    initialization remains available even when AutoProcessor cannot build.
+    """
+    tokenizer = AutoTokenizer.from_pretrained(
+        model_path,
+        trust_remote_code=trust_remote_code,
+    )
+    image_processor = AutoImageProcessor.from_pretrained(
+        model_path,
+        trust_remote_code=trust_remote_code,
+        use_fast=False,
+    )
+    return GenericVisionProcessorFallback(
+        tokenizer=tokenizer,
+        image_processor=image_processor,
+    )
+
+
+def _normalize_resize_shape(resize_shape: Any) -> Optional[Tuple[int, int]]:
+    if resize_shape is None:
+        return None
+    if isinstance(resize_shape, int):
+        if resize_shape <= 0:
+            raise ValueError(f"Invalid resize shape: {resize_shape}")
+        return (resize_shape, resize_shape)
+    if (
+        isinstance(resize_shape, (list, tuple))
+        and len(resize_shape) == 2
+        and all(isinstance(v, int) for v in resize_shape)
+    ):
+        width, height = resize_shape
+        if width <= 0 or height <= 0:
+            raise ValueError(f"Invalid resize shape: {resize_shape}")
+        return (width, height)
+    raise ValueError(
+        f"Unsupported resize shape type: {type(resize_shape)}. "
+        "Expected int or tuple/list of two integers."
+    )
+
+
+def process_image(
+    image: Any, resize_shape: Any = None, image_processor: Optional[Any] = None
+) -> Image.Image:
+    """
+    Lightweight image loader used by `load_images`.
+
+    Returns RGB PIL images, which is the native input format expected by
+    Transformers image processors.
+    """
+    del image_processor  # Kept for API compatibility with previous helper signature.
+
+    if isinstance(image, str):
+        with Image.open(image) as loaded_image:
+            image = ImageOps.exif_transpose(loaded_image)
+            image = image.convert("RGB")
+    elif isinstance(image, Image.Image):
+        image = ImageOps.exif_transpose(image)
+        if image.mode != "RGB":
+            image = image.convert("RGB")
+    else:
+        raise ValueError(
+            f"Unsupported normalized image type: {type(image)}. "
+            "Expected path string or PIL.Image.Image."
+        )
+
+    target_size = _normalize_resize_shape(resize_shape)
+    if target_size is not None and image.size != target_size:
+        resampling = (
+            Image.Resampling.BICUBIC if hasattr(Image, "Resampling") else Image.BICUBIC
+        )
+        image = image.resize(target_size, resampling)
+
+    return image
 
 
 def _module_available(module_name: str) -> bool:
@@ -672,32 +818,39 @@ def load(
                 )
                 return model, tokenizer
 
-            # For vision models, prefer mlx_vlm.load_processor which properly supports
-            # return_tensors="mlx". Standard transformers AutoProcessor returns numpy/torch
-            # tensors which are incompatible with MLX models.
             try:
-                tokenizer = load_processor(
-                    model_path,
-                    trust_remote_code=trust_remote_code,
+                tokenizer = AutoProcessor.from_pretrained(
+                    model_path, trust_remote_code=trust_remote_code
                 )
-            except Exception as processor_error:
-                if model_type != "qwen3_vl":
-                    # For non-qwen3_vl models, this is a hard error
-                    raise ValueError(
-                        f"Failed to initialize vision processor: {processor_error}"
-                    ) from processor_error
-
+            except Exception as auto_processor_error:
                 logging.warning(
-                    "mlx_vlm.load_processor failed for '%s' using transformers==%s: %s. "
-                    "Using qwen3_vl fallback processor (text + image only, video unsupported).",
+                    "AutoProcessor initialization failed for '%s': %s. "
+                    "Falling back to local tokenizer+image processor assembly.",
                     resolved_model,
-                    TRANSFORMERS_VERSION,
-                    processor_error,
+                    auto_processor_error,
                 )
-                tokenizer = _build_qwen3_vl_fallback_processor(
-                    model_path=model_path,
-                    trust_remote_code=trust_remote_code,
-                )
+                try:
+                    tokenizer = load_processor(
+                        model_path,
+                        trust_remote_code=trust_remote_code,
+                    )
+                except Exception as processor_error:
+                    if model_type != "qwen3_vl":
+                        raise ValueError(
+                            f"Failed to initialize vision processor: {processor_error}"
+                        ) from processor_error
+
+                    logging.warning(
+                        "Local fallback processor init failed for '%s' using transformers==%s: %s. "
+                        "Using qwen3_vl fallback processor (text + image only, video unsupported).",
+                        resolved_model,
+                        TRANSFORMERS_VERSION,
+                        processor_error,
+                    )
+                    tokenizer = _build_qwen3_vl_fallback_processor(
+                        model_path=model_path,
+                        trust_remote_code=trust_remote_code,
+                    )
         else:
             tokenizer = load_tokenizer(
                 model_path, tokenizer_config, trust_remote_code=trust_remote_code

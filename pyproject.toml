@@ -30,7 +30,7 @@ mlx_embeddings = "mlx_embeddings.cli:main"
 
 [project.optional-dependencies]
 all = [
-    "mlx-embeddings[extra]",
+    "mlx-embeddings[extra,dev]",
 ]
 
 extra = [

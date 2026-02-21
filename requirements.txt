@@ -2,3 +2,5 @@ mlx>=0.16.3
 mlx-vlm>=0.1.21
 transformers[sentencepiece]>=5.0.0rc3
 huggingface-hub>=0.25.1
+torch>=2.10.0
+torchvision>=0.25.0
