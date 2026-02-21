@@ -1,6 +1,6 @@
 [project]
 name = "mlx-embeddings"
-version = "0.0.3"
+version = "0.0.4"
 dynamic = [
     "dependencies",
 ]
@@ -27,6 +27,7 @@ classifiers = [
 
 [project.entry-points."console_scripts"]
 mlx_embeddings = "mlx_embeddings.cli:main"
+mlx_embeddings.convert = "mlx_embeddings.convert:main"
 
 [project.optional-dependencies]
 all = [
